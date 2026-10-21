@@ -1,0 +1,2265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Zip Clock — Pending Punch Acknowledgement</title>
+    <style>
+        :root {
+            --primary: #2f6fed;
+            --bg: #f3f5f8;
+            --card: #ffffff;
+            --text: #1c2330;
+            --muted: #6b7280;
+            --border: #e4e7ec;
+            --zc-navy: #383f4d;
+            --zc-blue: #4d9cf0;
+            --zc-text: #5f6368;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        [hidden] {
+            display: none !important;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #d9dee6;
+            color: var(--text);
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* Phone-sized container (full screen on real devices) */
+        .app {
+            position: relative;
+            max-width: 420px;
+            height: 100vh;
+            height: 100dvh;
+            margin: 0 auto;
+            background: var(--bg);
+            overflow: hidden;
+        }
+
+        /* ---------- Phone frame ---------- */
+        /* On a real phone: no frame, status bar and nav bar hidden */
+        .device-status,
+        .device-nav {
+            display: none;
+        }
+
+        /* On a desktop browser: standard Android size 360 × 800 */
+        @media (min-width: 500px) and (min-height: 600px) {
+            body {
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 24px 0;
+                background: #cfd5de;
+            }
+
+            .device {
+                width: 384px;            /* 360 screen + 2 × 12 bezel */
+                height: 824px;           /* 800 screen + 2 × 12 bezel */
+                max-height: calc(100vh - 48px);
+                padding: 12px;
+                display: flex;
+                flex-direction: column;
+                background: #111;
+                border-radius: 44px;
+                box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
+                overflow: hidden;
+            }
+
+            .device-status {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                height: 30px;
+                padding: 4px 22px 0;
+                background: var(--zc-navy);
+                color: #fff;
+                font-size: 13px;
+                font-weight: 600;
+                border-radius: 32px 32px 0 0;
+            }
+
+            .device-status-icons {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+            }
+
+            .device-battery {
+                width: 20px;
+                height: 10px;
+                padding: 1px;
+                border: 1.5px solid #fff;
+                border-radius: 3px;
+            }
+
+            .device-battery span {
+                display: block;
+                width: 20%;
+                height: 100%;
+                background: #fff;
+                border-radius: 1px;
+            }
+
+            .app {
+                flex: 1;
+                width: 100%;
+                max-width: none;
+                height: auto;
+                min-height: 0;
+            }
+
+            .device-nav {
+                display: flex;
+                justify-content: space-around;
+                align-items: center;
+                height: 44px;
+                padding: 0 40px;
+                background: #f8f9fa;
+                color: #5f6368;
+                border-radius: 0 0 32px 32px;
+            }
+
+            /* Header no longer needs the safe-area offset inside the frame */
+            .zc-header {
+                padding-top: 0;
+            }
+        }
+
+        /* Each screen fills the app; only one is visible at a time */
+        .screen {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            background: var(--bg);
+        }
+
+        .screen.slide-in {
+            animation: slide-in 0.25s ease-out;
+        }
+
+        .screen.slide-back {
+            animation: slide-back 0.25s ease-out;
+        }
+
+        @keyframes slide-in {
+            from { transform: translateX(100%); }
+            to   { transform: translateX(0); }
+        }
+
+        @keyframes slide-back {
+            from { transform: translateX(-30%); opacity: 0.6; }
+            to   { transform: translateX(0); opacity: 1; }
+        }
+
+        .scroll {
+            flex: 1;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        /* ---------- Header ---------- */
+
+        /* Standard app bar: 56px tall, 24px icons */
+        .zc-header {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            min-height: 56px;
+            padding: env(safe-area-inset-top) 16px 0;
+            background: var(--zc-navy);
+        }
+
+        .zc-back {
+            border: none;
+            background: none;
+            color: var(--zc-blue);
+            display: grid;
+            place-items: center;
+            cursor: pointer;
+        }
+
+        .zc-title {
+            font-size: 18px;
+            font-weight: 500;
+            color: #fff;
+        }
+
+        .zc-header-main {
+            gap: 20px;
+        }
+
+        .zc-header-main .zc-title {
+            flex: 1;
+        }
+
+        .zc-menu {
+            color: var(--zc-blue);
+            flex-shrink: 0;
+        }
+
+        .zc-header-icons {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            color: #fff;
+        }
+
+        .zc-chat {
+            position: relative;
+            display: grid;
+        }
+
+        .zc-chat-badge {
+            position: absolute;
+            top: -5px;
+            right: -6px;
+            min-width: 16px;
+            height: 16px;
+            padding: 0 4px;
+            display: grid;
+            place-items: center;
+            border-radius: 999px;
+            background: #e53935;
+            border: 1.5px solid #fff;
+            color: #fff;
+            font-size: 10px;
+            font-weight: 600;
+        }
+
+        .zc-tabs {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            background: var(--zc-navy);
+        }
+
+        .zc-tab {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 2px;
+            padding: 4px 0 8px;
+            font-size: 12px;
+            color: #8c93a0;
+            border-bottom: 3px solid transparent;
+        }
+
+        .zc-tab.active {
+            color: #fff;
+            border-bottom-color: var(--zc-blue);
+        }
+
+        /* ---------- Screen 1: Requests ---------- */
+
+        .zc-requests {
+            padding: 4px 16px 20px;
+        }
+
+        .zc-section-title {
+            text-align: center;
+            font-size: 16px;
+            font-weight: 500;
+            color: var(--zc-text);
+            margin: 12px 0 18px;
+        }
+
+        .tile-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 22px 16px;
+            margin-bottom: 8px;
+        }
+
+        .tile {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background: var(--card);
+            border-radius: 4px;
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+            text-decoration: none;
+            color: var(--zc-text);
+        }
+
+        /* Odd last tile sits centered, like the existing app */
+        .tile-center:last-child:nth-child(odd) {
+            grid-column: 1 / -1;
+            justify-self: center;
+            width: calc(50% - 8px);
+        }
+
+        .tile-badge {
+            position: absolute;
+            top: -10px;
+            right: -8px;
+            min-width: 26px;
+            height: 26px;
+            padding: 0 5px;
+            display: grid;
+            place-items: center;
+            border-radius: 999px;
+            background: var(--zc-blue);
+            color: #fff;
+            font-size: 12px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+        }
+
+        .tile-title {
+            min-height: 32px;
+            display: flex;
+            align-items: center;
+            padding: 12px 8px 0;
+            font-size: 12px;
+            color: #2c3a5a;
+            text-align: center;
+            line-height: 1.3;
+        }
+
+        .tile-icon {
+            width: 64px;
+            height: 64px;
+            margin: 10px 0 12px;
+            display: grid;
+            place-items: center;
+            border-radius: 50%;
+            background: #efefef;
+            color: var(--zc-blue);
+        }
+
+        /* Pinned to the bottom so tiles in the same row line up; one line only */
+        .tile-action {
+            width: 100%;
+            margin-top: auto;
+            padding: 8px 4px;
+            background: var(--zc-blue);
+            color: #fff;
+            font-size: 12px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            text-align: center;
+            border-radius: 0 0 4px 4px;
+        }
+
+        a.tile:active .tile-action {
+            background: #3a86d8;
+        }
+
+        /* ---------- Screens 2 & 3: list + detail ---------- */
+
+        .zc-list {
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .zc-summary {
+            align-self: center;
+            background: #e8eaed;
+            color: var(--zc-text);
+            font-size: 13px;
+            padding: 6px 14px;
+            border-radius: 999px;
+            text-align: center;
+        }
+
+        .zc-card,
+        .zc-profile {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            background: var(--card);
+            border-left: 4px solid #9aa0a6;
+            border-radius: 6px;
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+            color: var(--zc-text);
+            text-decoration: none;
+        }
+
+        .zc-card:active {
+            background: #f1f3f4;
+        }
+
+        .zc-profile {
+            border-left-color: var(--zc-blue);
+        }
+
+        .zc-avatar {
+            width: 40px;
+            height: 40px;
+            flex-shrink: 0;
+            border-radius: 50%;
+            display: grid;
+            place-items: center;
+            color: #fff;
+            font-size: 15px;
+        }
+
+        .zc-info {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+
+        .zc-name {
+            font-size: 15px;
+            font-weight: 500;
+        }
+
+        .zc-stats {
+            display: flex;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 2px 10px;
+            font-size: 12px;
+        }
+
+        .zc-profile-sub {
+            font-size: 12px;
+        }
+
+        .zc-chevron {
+            flex-shrink: 0;
+            color: #9aa0a6;
+        }
+
+        /* Detail: one card per web-table row, columns as label/value pairs */
+        .zc-row {
+            background: var(--card);
+            border-radius: 6px;
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+            overflow: hidden;
+        }
+
+        .zc-row-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 6px 12px;
+            background: #f1f3f4;
+        }
+
+        .zc-row-num {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--zc-text);
+        }
+
+        .zc-fields > div {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 7px 12px;
+            font-size: 13px;
+            border-top: 1px solid var(--border);
+        }
+
+        .zc-fields > div:first-child {
+            border-top: none;
+        }
+
+        .zc-fields dt {
+            color: var(--muted);
+        }
+
+        .zc-fields dd {
+            color: var(--text);
+            font-weight: 500;
+            text-align: right;
+        }
+
+        .tag {
+            font-size: 10px;
+            font-weight: 600;
+            padding: 2px 7px;
+            border-radius: 6px;
+        }
+
+        .tag-edited {
+            background: #e8f0fe;
+            color: var(--primary);
+        }
+
+        .tag-added {
+            background: #e6f4ea;
+            color: #1a7f37;
+        }
+
+        .time-old {
+            color: var(--text);
+            font-weight: 600;
+        }
+
+        .time-none {
+            color: var(--muted);
+        }
+
+        .zc-fields dd.time-new {
+            font-weight: 700;
+            color: var(--primary);
+        }
+
+        .empty {
+            text-align: center;
+            color: var(--muted);
+            padding: 48px 16px;
+            font-size: 14px;
+        }
+
+        /* ---------- Screen 4: Punches to Review ---------- */
+
+        .rv-select-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 12px;
+            background: var(--card);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .rv-select-all {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--zc-text);
+            cursor: pointer;
+        }
+
+        .rv-select-count {
+            font-size: 12px;
+            color: var(--muted);
+        }
+
+        input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            accent-color: var(--zc-blue);
+            flex-shrink: 0;
+        }
+
+        .rv-card {
+            display: block;
+            background: var(--card);
+            border-left: 4px solid #9aa0a6;
+            border-radius: 6px;
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+            overflow: hidden;
+            cursor: pointer;
+        }
+
+        .rv-card.selected {
+            border-left-color: var(--zc-blue);
+            box-shadow: 0 0 0 1.5px var(--zc-blue);
+        }
+
+        .rv-card-head {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 12px;
+            background: #f8f9fa;
+        }
+
+        .rv-event {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .rv-event-name {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text);
+        }
+
+        .rv-event-date {
+            font-size: 11px;
+            color: var(--muted);
+        }
+
+        .rv-status {
+            font-size: 10px;
+            font-weight: 600;
+            padding: 3px 9px;
+            border-radius: 999px;
+            white-space: nowrap;
+        }
+
+        .rv-status-pending   { background: #fff4d6; color: #9a6700; }
+        .rv-status-confirmed { background: #e6f4ea; color: #1a7f37; }
+        .rv-status-reported  { background: #fdecea; color: #d93025; }
+
+        /* Bottom actions — colors match the web Report / Confirm / Save buttons */
+        .rv-actions {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 8px;
+            padding: 8px 12px calc(env(safe-area-inset-bottom) + 8px);
+            background: var(--card);
+            border-top: 1px solid var(--border);
+        }
+
+        /* Standard 40px button height */
+        .rv-btn {
+            height: 40px;
+            padding: 0 8px;
+            font-size: 14px;
+            font-weight: 600;
+            border: none;
+            border-radius: 999px;
+            color: #fff;
+            cursor: pointer;
+        }
+
+        .rv-btn:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+
+        .rv-report  { background: #e5626f; }
+        .rv-confirm { background: #4caf7d; }
+        .rv-save    { background: #4d8ff5; }
+
+        .rv-toast {
+            position: absolute;
+            left: 16px;
+            right: 16px;
+            bottom: calc(env(safe-area-inset-bottom) + 68px);
+            z-index: 20;
+            padding: 10px 14px;
+            background: #1c2330;
+            color: #fff;
+            font-size: 13px;
+            text-align: center;
+            border-radius: 10px;
+        }
+
+        /* ---------- Screen 5: Review Actions ---------- */
+
+        .ra-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .ra-group-head {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            width: 100%;
+            padding: 9px 12px;
+            border: none;
+            border-left: 4px solid #0a57c2;
+            border-radius: 6px;
+            background: #dbe5f8;
+            color: var(--text);
+            font: inherit;
+            font-size: 14px;
+            font-weight: 700;
+            text-align: left;
+            cursor: pointer;
+        }
+
+        .ra-count {
+            min-width: 20px;
+            height: 20px;
+            padding: 0 6px;
+            display: grid;
+            place-items: center;
+            border-radius: 999px;
+            background: #f5b800;
+            color: #fff;
+            font-size: 11px;
+        }
+
+        .ra-group-head .zc-chevron {
+            margin-left: auto;
+            transform: rotate(90deg);
+            transition: transform 0.2s;
+        }
+
+        .ra-group.collapsed .zc-chevron {
+            transform: rotate(0deg);
+        }
+
+        .ra-group.collapsed .ra-item {
+            display: none;
+        }
+
+        .ra-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+        }
+
+        .ra-item .zc-avatar {
+            width: 34px;
+            height: 34px;
+            font-size: 13px;
+        }
+
+        .ra-info {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .ra-name {
+            font-size: 14px;
+            color: var(--text);
+        }
+
+        .ra-line {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 12px;
+            color: var(--text);
+        }
+
+        .ra-punch-type {
+            color: #c62828;
+            font-weight: 600;
+        }
+
+        .ra-icon-btn {
+            width: 32px;
+            height: 32px;
+            flex-shrink: 0;
+            display: grid;
+            place-items: center;
+            border: none;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+
+        .ra-view    { background: #dbe8fb; color: #2f6fed; }
+        .ra-resolve { background: #dcefe0; color: #2e8b47; }
+
+        /* ---------- Screen 6: Concern detail ---------- */
+
+        .cn-summary {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            padding: 10px 0;
+            background: #f5f7fc;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+        }
+
+        .cn-summary > div {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            padding: 0 6px;
+            border-left: 1px solid #c9ced6;
+        }
+
+        .cn-summary > div:first-child {
+            border-left: none;
+        }
+
+        .cn-summary span {
+            font-size: 11px;
+            color: var(--muted);
+        }
+
+        .cn-summary strong {
+            font-size: 15px;
+            color: var(--text);
+        }
+
+        .cn-heading {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text);
+            margin-top: 4px;
+        }
+
+        .cn-question {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            padding: 12px;
+            background: #f7f8fa;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+        }
+
+        .cn-question p {
+            font-size: 13px;
+            font-weight: 600;
+            line-height: 1.45;
+            color: var(--text);
+        }
+
+        .cn-answer {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 6px 8px;
+            font-size: 13px;
+            color: var(--text);
+        }
+
+        .cn-chip {
+            padding: 3px 12px;
+            border-radius: 999px;
+            font-size: 11px;
+            font-weight: 600;
+            color: #fff;
+        }
+
+        .cn-no     { background: #c62828; }
+        .cn-yes    { background: #2e8b47; }
+        .cn-reason { background: #f5c518; color: #3d3200; }
+
+        .cn-actions {
+            grid-template-columns: 1fr 1fr;
+        }
+
+        a.rv-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-decoration: none;
+        }
+
+        .rv-primary    { background: #0a57c2; }
+        .rv-delete     { background: #c62828; }
+        .rv-save-green {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            background: #1e7b34;
+        }
+
+        /* ---------- Screen 7: Edit Punch ---------- */
+        /* All icons use the theme blue (--zc-blue) */
+
+        .ep-date {
+            margin-left: auto;
+            font-size: 13px;
+            color: #fff;
+            white-space: nowrap;
+        }
+
+        .ep-topbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 12px;
+            background: var(--card);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .ep-hours-label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            color: var(--zc-text);
+        }
+
+        .ep-hours-label svg {
+            color: var(--zc-blue);
+        }
+
+        .ep-hours {
+            font-size: 15px;
+            color: var(--text);
+        }
+
+        .ep-form {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            padding: 12px;
+        }
+
+        .ep-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        .ep-field {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            min-width: 0;
+        }
+
+        .ep-field-label {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 12px;
+            color: var(--zc-text);
+        }
+
+        .ep-field-label svg {
+            flex-shrink: 0;
+            color: var(--zc-blue);
+        }
+
+        .ep-field-label em {
+            color: #d93025;
+            font-style: normal;
+        }
+
+        .ep-input {
+            position: relative;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            height: 40px;
+            padding: 0 10px;
+            background: var(--card);
+            border: 1px solid #c9ced6;
+            border-radius: 6px;
+        }
+
+        .ep-input:focus-within {
+            border-color: var(--zc-blue);
+        }
+
+        .ep-input.invalid {
+            border-color: #d93025;
+        }
+
+        .ep-input input,
+        .ep-input select,
+        .ep-input textarea {
+            flex: 1;
+            min-width: 0;
+            height: 100%;
+            padding: 0;
+            border: none;
+            background: transparent;
+            color: var(--text);
+            font: inherit;
+            font-size: 14px;
+            outline: none;
+        }
+
+        .ep-icon,
+        .ep-unit {
+            flex-shrink: 0;
+            color: var(--zc-blue);
+        }
+
+        .ep-unit {
+            font-weight: 600;
+        }
+
+        .ep-select select {
+            appearance: none;
+            padding-right: 18px;
+        }
+
+        .ep-caret {
+            position: absolute;
+            right: 10px;
+            color: var(--zc-blue);
+            pointer-events: none;
+        }
+
+        .ep-textarea {
+            height: auto;
+        }
+
+        .ep-textarea textarea {
+            padding: 8px 0;
+            resize: none;
+        }
+
+        /* Hide the browser's own (black) spinners and clock icon; the whole time field stays tappable */
+        .ep-input input[type="number"] {
+            -moz-appearance: textfield;
+        }
+
+        .ep-input input[type="number"]::-webkit-inner-spin-button,
+        .ep-input input[type="number"]::-webkit-outer-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+
+        .ep-input input[type="time"] {
+            position: relative;
+        }
+
+        .ep-input input[type="time"]::-webkit-calendar-picker-indicator {
+            position: absolute;
+            inset: 0;
+            width: auto;
+            height: auto;
+            opacity: 0;
+            cursor: pointer;
+        }
+
+        .ep-error {
+            color: #d93025;
+            font-size: 11px;
+        }
+
+        .ep-section {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 4px;
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text);
+        }
+
+        .ep-section > span {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .ep-section svg {
+            color: var(--zc-blue);
+        }
+
+        .ep-section::after {
+            content: "";
+            flex: 1;
+            height: 1px;
+            background: #c9ced6;
+            order: 1;
+        }
+
+        .ep-add {
+            order: 2;
+            width: 30px;
+            height: 30px;
+            display: grid;
+            place-items: center;
+            border: none;
+            border-radius: 50%;
+            background: var(--zc-blue);
+            cursor: pointer;
+        }
+
+        .ep-add svg {
+            color: #fff;
+        }
+
+        .ep-break-head,
+        .ep-break {
+            display: grid;
+            grid-template-columns: 78px 1fr 1fr 24px;
+            gap: 6px;
+            align-items: center;
+        }
+
+        .ep-break-head {
+            margin-bottom: 4px;
+            font-size: 11px;
+            color: var(--muted);
+        }
+
+        .ep-break {
+            margin-bottom: 8px;
+        }
+
+        .ep-break .ep-input {
+            padding: 0 6px;
+            gap: 4px;
+        }
+
+        .ep-break .ep-input input,
+        .ep-break .ep-input select {
+            font-size: 13px;
+        }
+
+        .ep-remove {
+            width: 24px;
+            height: 40px;
+            border: none;
+            background: none;
+            color: #d93025;
+            cursor: pointer;
+        }
+
+        .ep-empty {
+            font-size: 12px;
+            color: var(--muted);
+        }
+
+        /* Delete / Save — pill buttons in the app's theme */
+        #editFooter .rv-btn {
+            border-radius: 999px;
+        }
+
+        #editFooter .rv-delete     { background: #f2545b; }
+        #editFooter .rv-save-green { background: #5ac58d; }
+    </style>
+</head>
+<body>
+  <!-- Phone frame (desktop preview only — on a real phone the app fills the screen) -->
+  <div class="device">
+    <div class="device-status" aria-hidden="true">
+        <span id="deviceClock">12:25</span>
+        <span class="device-status-icons">
+            <svg viewBox="0 0 24 24" width="15" height="15"><path d="M2 20h3v-4H2zM7 20h3v-8H7zM12 20h3v-12h-3zM17 20h3V4h-3z" fill="currentColor"/></svg>
+            <svg viewBox="0 0 24 24" width="16" height="16"><path d="M12 20l-3.5-4a5 5 0 017 0zM5 13a10 10 0 0114 0l-2 2a7 7 0 00-10 0zM1.5 9.5a15 15 0 0121 0l-2 2a12 12 0 00-17 0z" fill="currentColor"/></svg>
+            <span class="device-battery"><span></span></span>
+            <span>20%</span>
+        </span>
+    </div>
+    <div class="app">
+
+        <!-- ================= Screen 1: Requests (main) ================= -->
+        <section class="screen" id="screenMain">
+            <header class="zc-header zc-header-main">
+                <svg class="zc-menu" viewBox="0 0 32 24" width="26" height="20"><path d="M2 3h24M2 12h28M2 21h20" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/></svg>
+                <h1 class="zc-title">Zip Clock</h1>
+                <span class="zc-header-icons">
+                    <span class="zc-chat">
+                        <svg viewBox="0 0 24 24" width="24" height="24"><path d="M4 4h14v11H9l-4 3v-3H4z M8 8h7M8 11h5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M18 8h2v11h-1v3l-4-3H9v-2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+                        <span class="zc-chat-badge">2</span>
+                    </span>
+                </span>
+            </header>
+
+            <nav class="zc-tabs">
+                <span class="zc-tab">
+                    <svg viewBox="0 0 24 24" width="24" height="24"><path d="M12 3L2 20h20z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M12 10v5M12 17.5v.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                    Alerts
+                </span>
+                <span class="zc-tab">
+                    <svg viewBox="0 0 24 24" width="24" height="24"><rect x="3" y="5" width="16" height="14" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M3 9h16M7 3v4M15 3v4" stroke="currentColor" stroke-width="1.5"/><circle cx="18" cy="17" r="4" fill="#383f4d" stroke="currentColor" stroke-width="1.5"/><path d="M18 15v2l1.2 1" stroke="currentColor" stroke-width="1.3" fill="none"/></svg>
+                    Shift Mgmt
+                </span>
+                <span class="zc-tab active">
+                    <svg viewBox="0 0 24 24" width="24" height="24"><rect x="3" y="3" width="8" height="8" rx="2" fill="currentColor"/><rect x="13" y="3" width="8" height="8" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="3" y="13" width="8" height="8" rx="2" fill="currentColor"/><rect x="13" y="13" width="8" height="8" rx="2" fill="currentColor"/></svg>
+                    Requests
+                </span>
+                <span class="zc-tab">
+                    <svg viewBox="0 0 24 24" width="24" height="24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M12 3.5v1.5M12 19v1.5M3.5 12H5M19 12h1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M12 7v5l-3 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                    Clock
+                </span>
+            </nav>
+
+            <main class="scroll zc-requests">
+                <h2 class="zc-section-title">Needing Action</h2>
+                <div class="tile-grid">
+                    <div class="tile">
+                        <span class="tile-badge">47</span>
+                        <span class="tile-title">Punches to Approve</span>
+                        <span class="tile-icon">
+                            <svg viewBox="0 0 48 48" width="38" height="38"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M13 14c3-3 7-5 11-5s8 2 11 5"/><path d="M10 25c0-8 6-13 14-13s14 5 14 13"/><path d="M14 31v-6c0-6 4-10 10-10s10 4 10 10v1"/><path d="M18 36c-.8-3-1-6-1-11 0-4 3-7 7-7s7 3 7 7v2"/><path d="M22 39c-1-4-1.6-8-1.6-14 0-2 1.6-3.6 3.6-3.6s3.6 1.6 3.6 3.6c0 3 .2 5 .6 7"/><path d="M24 25c0 6 .8 10 2.4 14"/><path d="M14 36c1.4 1.4 2.6 2.4 4 3.2"/></g><circle cx="34" cy="33" r="7" fill="#efefef" stroke="currentColor" stroke-width="2"/><path d="M31 33l2.2 2.2L37.5 31" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        </span>
+                        <span class="tile-action">Punch Approvals</span>
+                    </div>
+
+                    <div class="tile">
+                        <span class="tile-badge">11</span>
+                        <span class="tile-title">Punches to Balance</span>
+                        <span class="tile-icon">
+                            <svg viewBox="0 0 48 48" width="38" height="38"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M13 14c3-3 7-5 11-5s8 2 11 5"/><path d="M10 25c0-8 6-13 14-13s14 5 14 13"/><path d="M14 31v-6c0-6 4-10 10-10s10 4 10 10v1"/><path d="M18 36c-.8-3-1-6-1-11 0-4 3-7 7-7s7 3 7 7v2"/><path d="M22 39c-1-4-1.6-8-1.6-14 0-2 1.6-3.6 3.6-3.6s3.6 1.6 3.6 3.6c0 3 .2 5 .6 7"/><path d="M24 25c0 6 .8 10 2.4 14"/><path d="M14 36c1.4 1.4 2.6 2.4 4 3.2"/></g><circle cx="34" cy="33" r="7" fill="#efefef" stroke="currentColor" stroke-width="2"/><path d="M31.5 30.5l5 5M36.5 30.5l-5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                        </span>
+                        <span class="tile-action">Unbalanced Punches</span>
+                    </div>
+
+                    <!-- Manager's own updated punches (when the manager is also an employee) -->
+                    <a class="tile tile-center" href="#review" data-nav>
+                        <span class="tile-badge" id="myAckBadge">0</span>
+                        <span class="tile-title">Punches to Acknowledge</span>
+                        <span class="tile-icon">
+                            <svg viewBox="0 0 48 48" width="38" height="38"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M13 14c3-3 7-5 11-5s8 2 11 5"/><path d="M10 25c0-8 6-13 14-13s14 5 14 13"/><path d="M14 31v-6c0-6 4-10 10-10s10 4 10 10v1"/><path d="M18 36c-.8-3-1-6-1-11 0-4 3-7 7-7s7 3 7 7v2"/><path d="M22 39c-1-4-1.6-8-1.6-14 0-2 1.6-3.6 3.6-3.6s3.6 1.6 3.6 3.6c0 3 .2 5 .6 7"/><path d="M24 25c0 6 .8 10 2.4 14"/><path d="M14 36c1.4 1.4 2.6 2.4 4 3.2"/></g><circle cx="34" cy="33" r="7" fill="#efefef" stroke="currentColor" stroke-width="2"/><path d="M31 33.5h1.6v3.5H31zM32.6 33.5l1.6-3c.6 0 1 .5.9 1.1l-.3 1.4h2c.5 0 .9.5.8 1l-.6 2.3c-.1.4-.5.7-.9.7h-3.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+                        </span>
+                        <span class="tile-action">Acknowledge Punches</span>
+                    </a>
+                </div>
+
+                <h2 class="zc-section-title">Awaiting Action from Others</h2>
+                <div class="tile-grid">
+                    <div class="tile">
+                        <span class="tile-badge">1</span>
+                        <span class="tile-title">Employees to take Break</span>
+                        <span class="tile-icon">
+                            <svg viewBox="0 0 48 48" width="38" height="38"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 22h24v4a10 10 0 01-10 10h-4a10 10 0 01-10-10z"/><path d="M34 24h2a4 4 0 010 8h-3"/><path d="M8 39h30"/><path d="M17 10c-2 2 2 4 0 6M22 10c-2 2 2 4 0 6M27 10c-2 2 2 4 0 6"/></g></svg>
+                        </span>
+                        <span class="tile-action">Suggest Break</span>
+                    </div>
+
+                    <div class="tile">
+                        <span class="tile-badge">1</span>
+                        <span class="tile-title">Employees to Clock Out</span>
+                        <span class="tile-icon">
+                            <svg viewBox="0 0 48 48" width="38" height="38"><circle cx="24" cy="24" r="15" fill="none" stroke="currentColor" stroke-width="2"/><path d="M24 11.5v2.5M24 34v2.5M11.5 24h2.5M34 24h2.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M24 15v9l-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="24" cy="24" r="1.8" fill="currentColor"/></svg>
+                        </span>
+                        <span class="tile-action">Suggest Clock Out</span>
+                    </div>
+
+                    <!-- Starts the Pending Acknowledgement flow -->
+                    <a class="tile tile-center" href="#list" data-nav>
+                        <span class="tile-badge" id="pendingAckBadge">0</span>
+                        <span class="tile-title">Pending Punch to Acknowledge</span>
+                        <span class="tile-icon">
+                            <svg viewBox="0 0 48 48" width="38" height="38"><g fill="none" stroke="currentColor" stroke-width="2"><circle cx="21" cy="16" r="7"/><path d="M8 38c0-7 6-12 13-12 3 0 5 .8 7 2"/></g><circle cx="33" cy="34" r="7" fill="#efefef" stroke="currentColor" stroke-width="2"/><path d="M30 30.2h6M30 37.8h6M31 30.2c0 2.8 4 3 4 3.8s-4 1-4 3.8M35 30.2c0 2.8-4 3-4 3.8s4 1 4 3.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        </span>
+                        <span class="tile-action">Need Acknowledgement</span>
+                    </a>
+
+                    <!-- Reported concerns (attestation, shift confirmation, acknowledgement) to resolve -->
+                    <a class="tile" href="#actions" data-nav>
+                        <span class="tile-badge" id="actionsBadge">0</span>
+                        <span class="tile-title">Reported Concerns</span>
+                        <span class="tile-icon">
+                            <svg viewBox="0 0 48 48" width="38" height="38"><rect x="10" y="8" width="24" height="31" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 8V5h12v3" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M16 17h12M16 23h12M16 29h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="34" cy="34" r="7" fill="#efefef" stroke="currentColor" stroke-width="2"/><path d="M34 30.5v4M34 37v.4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                        </span>
+                        <span class="tile-action">Review Actions</span>
+                    </a>
+                </div>
+            </main>
+        </section>
+
+        <!-- ================= Screen 2: Employee list ================= -->
+        <section class="screen" id="screenList" hidden>
+            <header class="zc-header">
+                <button class="zc-back" data-back="main" aria-label="Go back">
+                    <svg viewBox="0 0 24 24" width="24" height="24"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+                <h1 class="zc-title">Zip Clock</h1>
+            </header>
+
+            <main class="scroll zc-list" id="listScroll">
+                <p class="zc-summary" id="summary"></p>
+                <div class="zc-list" id="employeeList" style="padding:0"></div>
+            </main>
+        </section>
+
+        <!-- ================= Screen 3: Employee detail ================= -->
+        <section class="screen" id="screenDetail" hidden>
+            <header class="zc-header">
+                <button class="zc-back" data-back="list" aria-label="Go back">
+                    <svg viewBox="0 0 24 24" width="24" height="24"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+                <h1 class="zc-title">Zip Clock</h1>
+            </header>
+
+            <main class="scroll zc-list" id="detailScroll">
+                <section class="zc-profile" id="profile"></section>
+                <div class="zc-list" id="punchList" style="padding:0"></div>
+            </main>
+        </section>
+
+        <!-- ================= Screen 4: Punches to Review (manager's own punches) ================= -->
+        <section class="screen" id="screenReview" hidden>
+            <header class="zc-header">
+                <button class="zc-back" data-back="main" aria-label="Go back">
+                    <svg viewBox="0 0 24 24" width="24" height="24"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+                <h1 class="zc-title">Zip Clock</h1>
+            </header>
+
+            <div class="rv-select-bar">
+                <label class="rv-select-all">
+                    <input type="checkbox" id="selectAll">
+                    <span>Select all</span>
+                </label>
+                <span class="rv-select-count" id="selectCount">0 selected</span>
+            </div>
+
+            <main class="scroll zc-list" id="reviewScroll">
+                <p class="zc-summary" id="reviewSummary"></p>
+                <div class="zc-list" id="reviewList" style="padding:0"></div>
+            </main>
+
+            <footer class="rv-actions">
+                <button class="rv-btn rv-report" id="reportBtn" disabled>Report</button>
+                <button class="rv-btn rv-confirm" id="confirmBtn" disabled>Confirm</button>
+                <button class="rv-btn rv-save" id="saveBtn" disabled>Save</button>
+            </footer>
+        </section>
+
+        <!-- ================= Screen 5: Review Actions (reported concerns) ================= -->
+        <section class="screen" id="screenActions" hidden>
+            <header class="zc-header">
+                <button class="zc-back" data-back="main" aria-label="Go back">
+                    <svg viewBox="0 0 24 24" width="24" height="24"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+                <h1 class="zc-title">Zip Clock</h1>
+            </header>
+
+            <main class="scroll zc-list" id="actionsScroll">
+                <p class="zc-summary" id="actionsSummary"></p>
+                <div id="actionsList"></div>
+            </main>
+        </section>
+
+        <!-- ================= Screen 6: Concern detail (attestation / shift confirmation) ================= -->
+        <section class="screen" id="screenConcern" hidden>
+            <header class="zc-header">
+                <button class="zc-back" data-back="actions" aria-label="Go back">
+                    <svg viewBox="0 0 24 24" width="24" height="24"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+                <h1 class="zc-title">Zip Clock</h1>
+            </header>
+
+            <main class="scroll zc-list" id="concernScroll">
+                <section class="zc-profile" id="concernProfile"></section>
+                <div class="cn-summary" id="concernSummary"></div>
+                <h2 class="cn-heading" id="concernHeading"></h2>
+                <div class="zc-list" id="concernQuestions" style="padding:0"></div>
+            </main>
+
+            <footer class="rv-actions cn-actions">
+                <button class="rv-btn rv-confirm" id="concernResolveBtn">Resolve</button>
+                <a class="rv-btn rv-primary" id="concernEditBtn" href="#" data-nav>Edit Punches</a>
+            </footer>
+        </section>
+
+        <!-- ================= Screen 7: Edit Punch ================= -->
+        <section class="screen" id="screenEdit" hidden>
+            <header class="zc-header">
+                <button class="zc-back" data-back="actions" aria-label="Go back">
+                    <svg viewBox="0 0 24 24" width="24" height="24"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+                <h1 class="zc-title" id="editTitle">Edit Punch</h1>
+                <span class="ep-date" id="editDate"></span>
+            </header>
+
+            <div class="ep-topbar">
+                <span class="ep-hours-label">
+                    <svg viewBox="0 0 24 24" width="18" height="18"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 7v5l3 2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                    Clock Hours
+                </span>
+                <strong class="ep-hours" id="clockHours">00:00</strong>
+            </div>
+
+            <main class="scroll" id="editScroll">
+                <form class="ep-form" id="editForm" novalidate>
+                    <label class="ep-field">
+                        <span class="ep-field-label">
+                            <svg viewBox="0 0 24 24" width="15" height="15"><path d="M4 7h16v12H4z M9 7V5h6v2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+                            Job Code <em>*</em>
+                        </span>
+                        <span class="ep-input ep-select">
+                            <select id="epJobCode"></select>
+                            <svg class="ep-caret" viewBox="0 0 10 6" width="11" height="7"><path d="M0 0h10L5 6z" fill="currentColor"/></svg>
+                        </span>
+                        <small class="ep-error" data-for="epJobCode" hidden>Select a job code</small>
+                    </label>
+
+                    <label class="ep-field">
+                        <span class="ep-field-label">
+                            <svg viewBox="0 0 24 24" width="15" height="15"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M14.5 9.5c-.4-1-1.4-1.5-2.5-1.5-1.4 0-2.5.8-2.5 2s1.1 1.7 2.5 2 2.5.8 2.5 2-1.1 2-2.5 2c-1.1 0-2.1-.5-2.5-1.5M12 6.5V8M12 16v1.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+                            Pay Rate
+                        </span>
+                        <span class="ep-input">
+                            <span class="ep-unit">$</span>
+                            <input type="number" id="epPayRate" step="0.01" min="0" inputmode="decimal" placeholder="0.00">
+                        </span>
+                    </label>
+
+                    <div class="ep-row">
+                        <label class="ep-field">
+                            <span class="ep-field-label">
+                                <svg viewBox="0 0 24 24" width="15" height="15"><path d="M14 4h5v16h-5 M4 12h10M10 8l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                Clock In <em>*</em>
+                            </span>
+                            <span class="ep-input">
+                                <svg class="ep-icon" viewBox="0 0 24 24" width="17" height="17"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 7v5l3 2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                                <input type="time" id="epClockIn">
+                            </span>
+                            <small class="ep-error" data-for="epClockIn" hidden>Enter clock in</small>
+                        </label>
+                        <label class="ep-field">
+                            <span class="ep-field-label">
+                                <svg viewBox="0 0 24 24" width="15" height="15"><path d="M10 4H5v16h5 M10 12h10M16 8l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                Clock Out
+                            </span>
+                            <span class="ep-input">
+                                <svg class="ep-icon" viewBox="0 0 24 24" width="17" height="17"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 7v5l3 2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                                <input type="time" id="epClockOut">
+                            </span>
+                        </label>
+                    </div>
+
+                    <div class="ep-section">
+                        <span>
+                            <svg viewBox="0 0 24 24" width="17" height="17"><path d="M5 11h12v3a5 5 0 01-5 5h-2a5 5 0 01-5-5z M17 12h1.5a2 2 0 010 4H16 M9 4c-1 1 1 2 0 4M13 4c-1 1 1 2 0 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            Break
+                        </span>
+                        <button type="button" class="ep-add" id="addBreakBtn" aria-label="Add break">
+                            <svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+                        </button>
+                    </div>
+                    <div id="breakList"></div>
+
+                    <div class="ep-section">
+                        <span>
+                            <svg viewBox="0 0 24 24" width="17" height="17"><rect x="3" y="6" width="18" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="12" cy="12" r="2.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M6 9.5v5M18 9.5v5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+                            Tip Amount
+                        </span>
+                    </div>
+                    <div class="ep-row">
+                        <label class="ep-field">
+                            <span class="ep-field-label">Cash</span>
+                            <span class="ep-input">
+                                <span class="ep-unit">$</span>
+                                <input type="number" id="epCash" step="0.01" min="0" inputmode="decimal" placeholder="0.00">
+                            </span>
+                        </label>
+                        <label class="ep-field">
+                            <span class="ep-field-label">Credit</span>
+                            <span class="ep-input">
+                                <span class="ep-unit">$</span>
+                                <input type="number" id="epCredit" step="0.01" min="0" inputmode="decimal" placeholder="0.00">
+                            </span>
+                        </label>
+                    </div>
+
+                    <label class="ep-field">
+                        <span class="ep-field-label">
+                            <svg viewBox="0 0 24 24" width="15" height="15"><path d="M5 4h14v16H5z M9 9h6M9 13h6M9 17h3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            Adjustment Reason <em>*</em>
+                        </span>
+                        <span class="ep-input ep-select">
+                            <select id="epReason"></select>
+                            <svg class="ep-caret" viewBox="0 0 10 6" width="11" height="7"><path d="M0 0h10L5 6z" fill="currentColor"/></svg>
+                        </span>
+                        <small class="ep-error" data-for="epReason" hidden>Select an adjustment reason</small>
+                    </label>
+
+                    <label class="ep-field">
+                        <span class="ep-field-label">
+                            <svg viewBox="0 0 24 24" width="15" height="15"><path d="M4 5h16v11H9l-5 4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+                            Comments
+                        </span>
+                        <span class="ep-input ep-textarea">
+                            <textarea id="epComments" rows="2" placeholder="Add a comment"></textarea>
+                        </span>
+                    </label>
+                </form>
+            </main>
+
+            <footer class="rv-actions cn-actions" id="editFooter">
+                <button class="rv-btn rv-delete" id="deletePunchBtn">Delete</button>
+                <button class="rv-btn rv-save-green" id="savePunchBtn">
+                    <svg viewBox="0 0 24 24" width="16" height="16"><path d="M5 3h11l3 3v15H5z M8 3v6h8V3 M8 21v-7h8v7" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+                    Save
+                </button>
+            </footer>
+        </section>
+
+        <div class="rv-toast" id="toast" hidden></div>
+    </div>
+    <div class="device-nav" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="18" height="18"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <svg viewBox="0 0 24 24" width="18" height="18"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+        <svg viewBox="0 0 24 24" width="18" height="18"><path d="M5 7h14M5 12h14M5 17h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    </div>
+  </div>
+
+    <script>
+        // ================= DUMMY data — replace with your API response =================
+        // Same columns as the web "Pending Punch Acknowledgement" table.
+        // An empty originalTime means the manager added a missing punch.
+
+        function row(name, businessDate, type, originalTime, updatedTime, modifiedBy, modifiedAt) {
+            return { name, businessDate, type, originalTime, updatedTime, modifiedBy, modifiedAt };
+        }
+
+        const pendingPunches = [
+            row("Liam K",   "10/16/2026", "Rest Break End",   "7:28a",  "7:16a",  "Andrew", "2026/10/16 08:47 AM"),
+            row("Sofia M",  "10/16/2026", "Rest Break End",   "6:04a",  "5:50a",  "Andrew", "2026/10/19 02:18 AM"),
+            row("Noah P",   "10/16/2026", "Clock In",         "8:11a",  "8:03a",  "Andrew", "2026/10/16 09:12 AM"),
+            row("Noah P",   "10/16/2026", "Meal Break Start", "8:36a",  "8:30a",  "Andrew", "2026/10/16 09:12 AM"),
+            row("Noah P",   "10/16/2026", "Meal Break End",   "",       "8:40a",  "Andrew", "2026/10/16 09:12 AM"),
+            row("Noah P",   "10/16/2026", "Clock Out",        "9:22a",  "9:00a",  "Andrew", "2026/10/16 09:12 AM"),
+            row("Noah P",   "10/15/2026", "Clock In",         "7:57a",  "5:00a",  "Andrew", "2026/10/16 09:11 AM"),
+            row("Noah P",   "10/15/2026", "Meal Break Start", "5:12a",  "5:05a",  "Andrew", "2026/10/16 09:11 AM"),
+            row("Noah P",   "10/15/2026", "Meal Break End",   "5:31a",  "5:10a",  "Andrew", "2026/10/16 09:11 AM"),
+            row("Noah P",   "10/15/2026", "Clock Out",        "",       "6:00a",  "Andrew", "2026/10/16 09:11 AM"),
+            row("Mia T",    "10/15/2026", "Clock In",         "9:12a",  "9:00a",  "Andrew", "2026/10/15 10:02 AM"),
+            row("Mia T",    "10/15/2026", "Clock Out",        "5:48p",  "5:30p",  "Andrew", "2026/10/15 10:02 AM"),
+            row("Ethan W",  "10/15/2026", "Rest Break Start", "1:21p",  "1:15p",  "Maria",  "2026/10/15 03:40 PM"),
+            row("Ethan W",  "10/15/2026", "Rest Break End",   "1:39p",  "1:25p",  "Maria",  "2026/10/15 03:40 PM"),
+            row("Ava L",    "10/14/2026", "Clock Out",        "11:58p", "10:00p", "Maria",  "2026/10/15 07:30 AM"),
+            row("Lucas B",  "10/14/2026", "Clock In",         "6:09a",  "6:00a",  "Andrew", "2026/10/14 06:45 AM"),
+            row("Lucas B",  "10/14/2026", "Meal Break Start", "",       "11:00a", "Andrew", "2026/10/14 06:45 AM"),
+            row("Lucas B",  "10/14/2026", "Meal Break End",   "11:44a", "11:30a", "Andrew", "2026/10/14 06:45 AM"),
+            row("Chloe H",  "10/17/2026", "Clock In",         "8:41a",  "8:30a",  "Maria",  "2026/10/17 09:05 AM"),
+            row("Mateo G",  "10/17/2026", "Clock Out",        "4:26p",  "4:00p",  "Andrew", "2026/10/18 08:15 AM"),
+            row("Mateo G",  "10/17/2026", "Rest Break Start", "1:07p",  "1:00p",  "Andrew", "2026/10/18 08:15 AM"),
+            row("Mateo G",  "10/17/2026", "Rest Break End",   "1:22p",  "1:10p",  "Andrew", "2026/10/18 08:15 AM"),
+            row("Zoe F",    "10/17/2026", "Meal Break End",   "12:58p", "12:30p", "Maria",  "2026/10/17 02:20 PM"),
+            row("Daniel V", "10/18/2026", "Clock In",         "7:13a",  "7:00a",  "Andrew", "2026/10/18 07:40 AM"),
+            row("Daniel V", "10/18/2026", "Clock Out",        "3:45p",  "3:30p",  "Andrew", "2026/10/18 04:10 PM"),
+            row("Isla N",   "10/18/2026", "Rest Break End",   "10:38a", "10:25a", "Maria",  "2026/10/18 11:02 AM"),
+            row("Owen C",   "10/18/2026", "Clock In",         "6:14a",  "6:00a",  "Andrew", "2026/10/18 06:50 AM"),
+            row("Owen C",   "10/18/2026", "Meal Break Start", "10:16a", "10:00a", "Andrew", "2026/10/18 06:50 AM"),
+            row("Ruby S",   "10/18/2026", "Clock Out",        "",       "9:15p",  "Maria",  "2026/10/19 08:30 AM"),
+            row("Leo D",    "10/19/2026", "Clock In",         "6:07a",  "5:55a",  "Andrew", "2026/10/19 06:20 AM"),
+            row("Leo D",    "10/19/2026", "Rest Break Start", "9:11a",  "9:00a",  "Andrew", "2026/10/19 06:20 AM"),
+            row("Nora J",   "10/19/2026", "Meal Break Start", "11:47a", "11:30a", "Maria",  "2026/10/19 01:12 PM"),
+            row("Nora J",   "10/19/2026", "Meal Break End",   "12:19p", "12:00p", "Maria",  "2026/10/19 01:12 PM"),
+            row("Caleb Y",  "10/19/2026", "Clock Out",        "2:52p",  "2:30p",  "Andrew", "2026/10/19 03:05 PM"),
+            row("Hazel Q",  "10/19/2026", "Clock In",         "8:06a",  "8:00a",  "Maria",  "2026/10/19 08:22 AM"),
+            row("Hazel Q",  "10/19/2026", "Rest Break Start", "",       "10:15a", "Maria",  "2026/10/19 08:22 AM"),
+            row("Hazel Q",  "10/19/2026", "Rest Break End",   "10:34a", "10:25a", "Maria",  "2026/10/19 08:22 AM"),
+        ];
+
+        // Manager's OWN punches (manager is also an employee) that someone updated.
+        // Same columns as the web "Punches to Review" table. status: "" | "Confirmed" | "Reported"
+        let myPunches = [
+            { id: 1, event: "Break Start(Rest)", date: "10/16/2026", original: "",      updated: "5:49a",  by: "Andrew", reason: "Due to System Failure" },
+            { id: 2, event: "Break End(Rest)",   date: "10/16/2026", original: "",      updated: "5:50a",  by: "Andrew", reason: "Due to System Failure" },
+            { id: 3, event: "Clock In",          date: "10/17/2026", original: "8:14a", updated: "8:00a",  by: "Maria",  reason: "Forgot to Clock In" },
+            { id: 4, event: "Break Start(Meal)", date: "10/17/2026", original: "",      updated: "12:00p", by: "Maria",  reason: "Missed Break Punch" },
+            { id: 5, event: "Break End(Meal)",   date: "10/17/2026", original: "",      updated: "12:30p", by: "Maria",  reason: "Missed Break Punch" },
+            { id: 6, event: "Clock Out",         date: "10/17/2026", original: "6:42p", updated: "5:00p",  by: "Maria",  reason: "Forgot to Clock Out" },
+            { id: 7, event: "Clock In",          date: "10/18/2026", original: "7:09a", updated: "7:00a",  by: "Andrew", reason: "Device Offline" },
+        ].map(p => ({ ...p, status: "" }));
+
+        // ================= Helpers =================
+
+        const avatarColors = ["#4a5d0b", "#7fbf9a", "#c9a283", "#6f8f5e", "#6b7680", "#3d3df5", "#36b81a", "#2f6fed", "#b5527a", "#d08a1f"];
+
+        function escapeHtml(text) {
+            const div = document.createElement("div");
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function getInitials(name) {
+            const parts = name.trim().split(/\s+/);
+            const initials = parts.length > 1 ? parts[0][0] + parts[parts.length - 1][0] : parts[0][0];
+            return initials.toUpperCase();
+        }
+
+        // Same name always gets the same color
+        function getAvatarColor(name) {
+            let hash = 0;
+            for (let i = 0; i < name.length; i++) {
+                hash = (hash * 31 + name.charCodeAt(i)) % 1000;
+            }
+            return avatarColors[hash % avatarColors.length];
+        }
+
+        function avatarHtml(name) {
+            return `<span class="zc-avatar" style="background:${getAvatarColor(name)}">${escapeHtml(getInitials(name))}</span>`;
+        }
+
+        // Group rows by employee (keeps API order)
+        function groupByEmployee(rows) {
+            const employees = new Map();
+            for (let row of rows) {
+                if (!employees.has(row.name)) {
+                    employees.set(row.name, { name: row.name, count: 0, dates: new Set() });
+                }
+                const employee = employees.get(row.name);
+                employee.count++;
+                employee.dates.add(row.businessDate);
+            }
+            return Array.from(employees.values());
+        }
+
+        const employees = groupByEmployee(pendingPunches);
+
+        // ================= Screen 1: Requests =================
+
+        // Badge counts employees (not punches), like the existing app
+        document.getElementById("pendingAckBadge").textContent = employees.length;
+
+        function updateMyAckBadge() {
+            document.getElementById("myAckBadge").textContent = myPunches.length;
+        }
+
+        // ================= Screen 2: Employee list =================
+
+        function renderList() {
+            document.getElementById("summary").textContent =
+                employees.length + (employees.length === 1 ? " Employee" : " Employees") + " Pending Punch Acknowledgement";
+
+            const list = document.getElementById("employeeList");
+            if (employees.length === 0) {
+                list.innerHTML = `<p class="empty">No pending acknowledgements 🎉</p>`;
+                return;
+            }
+
+            list.innerHTML = employees.map(employee => {
+                const dates = Array.from(employee.dates);
+                const dateText = dates.length === 1 ? dates[0] : dates.length + " business dates";
+                return `
+                    <a class="zc-card" href="#detail/${encodeURIComponent(employee.name)}" data-nav>
+                        ${avatarHtml(employee.name)}
+                        <span class="zc-info">
+                            <span class="zc-name">${escapeHtml(employee.name)}</span>
+                            <span class="zc-stats">
+                                <span>Pending Punches : ${employee.count}</span>
+                                <span>${escapeHtml(dateText)}</span>
+                            </span>
+                        </span>
+                        <svg class="zc-chevron" viewBox="0 0 24 24" width="20" height="20"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </a>`;
+            }).join("");
+        }
+
+        // ================= Screen 3: Employee detail =================
+        // Same columns as the web table; Name is already on the profile card
+
+        function renderDetail(name) {
+            const rows = pendingPunches.filter(p => p.name === name);
+
+            document.getElementById("profile").innerHTML = `
+                ${avatarHtml(name)}
+                <span class="zc-info">
+                    <span class="zc-name">${escapeHtml(name)}</span>
+                    <span class="zc-profile-sub">${rows.length} ${rows.length === 1 ? "punch" : "punches"} pending acknowledgement</span>
+                </span>`;
+
+            document.getElementById("punchList").innerHTML = rows.length === 0
+                ? `<p class="empty">No pending punches for this employee.</p>`
+                : rows.map((punch, index) => {
+                    const isAdded = punch.originalTime === "";
+                    const original = isAdded
+                        ? `<span class="time-none">—</span>`
+                        : `<span class="time-old">${escapeHtml(punch.originalTime)}</span>`;
+                    return `
+                        <article class="zc-row">
+                            <div class="zc-row-head">
+                                <span class="zc-row-num">#${index + 1}</span>
+                                <span class="tag ${isAdded ? "tag-added" : "tag-edited"}">${isAdded ? "Added" : "Edited"}</span>
+                            </div>
+                            <dl class="zc-fields">
+                                <div><dt>Business Date</dt><dd>${escapeHtml(punch.businessDate)}</dd></div>
+                                <div><dt>Type</dt><dd>${escapeHtml(punch.type)}</dd></div>
+                                <div><dt>Original Time</dt><dd>${original}</dd></div>
+                                <div><dt>Updated Time</dt><dd class="time-new">${escapeHtml(punch.updatedTime)}</dd></div>
+                                <div><dt>Modified By</dt><dd>${escapeHtml(punch.modifiedBy)}</dd></div>
+                                <div><dt>Modified At</dt><dd>${escapeHtml(punch.modifiedAt)}</dd></div>
+                            </dl>
+                        </article>`;
+                }).join("");
+
+            document.getElementById("detailScroll").scrollTop = 0;
+        }
+
+        // ================= Screen 4: Punches to Review =================
+        // Flow: select punches → Confirm or Report → Save submits them.
+
+        const reviewList = document.getElementById("reviewList");
+        const selectAll = document.getElementById("selectAll");
+        const reportBtn = document.getElementById("reportBtn");
+        const confirmBtn = document.getElementById("confirmBtn");
+        const saveBtn = document.getElementById("saveBtn");
+        const toast = document.getElementById("toast");
+        const selectedIds = new Set();
+
+        function renderReviewCard(punch) {
+            const selected = selectedIds.has(punch.id);
+            const original = punch.original
+                ? `<span class="time-old">${escapeHtml(punch.original)}</span>`
+                : `<span class="time-none">—</span>`;
+            const status = punch.status || "Pending";
+
+            return `
+                <label class="rv-card ${selected ? "selected" : ""}">
+                    <div class="rv-card-head">
+                        <input type="checkbox" class="rv-check" data-id="${punch.id}" ${selected ? "checked" : ""}>
+                        <span class="rv-event">
+                            <span class="rv-event-name">${escapeHtml(punch.event)}</span>
+                            <span class="rv-event-date">${escapeHtml(punch.date)}</span>
+                        </span>
+                        <span class="rv-status rv-status-${status.toLowerCase()}">${status}</span>
+                    </div>
+                    <dl class="zc-fields">
+                        <div><dt>Original</dt><dd>${original}</dd></div>
+                        <div><dt>Updated</dt><dd class="time-new">${escapeHtml(punch.updated)}</dd></div>
+                        <div><dt>By</dt><dd>${escapeHtml(punch.by)}</dd></div>
+                        <div><dt>Adjustment Reason</dt><dd>${escapeHtml(punch.reason)}</dd></div>
+                    </dl>
+                </label>`;
+        }
+
+        function renderReview() {
+            document.getElementById("reviewSummary").textContent =
+                myPunches.length + (myPunches.length === 1 ? " Punch" : " Punches") + " to Acknowledge";
+            reviewList.innerHTML = myPunches.length
+                ? myPunches.map(renderReviewCard).join("")
+                : `<p class="empty">All punches reviewed. Nothing left to acknowledge 🎉</p>`;
+
+            const selected = selectedIds.size;
+            document.getElementById("selectCount").textContent = selected + " selected";
+            selectAll.checked = myPunches.length > 0 && selected === myPunches.length;
+            selectAll.indeterminate = selected > 0 && selected < myPunches.length;
+            selectAll.disabled = myPunches.length === 0;
+
+            reportBtn.disabled = selected === 0;
+            confirmBtn.disabled = selected === 0;
+            saveBtn.disabled = !myPunches.some(p => p.status);
+            updateMyAckBadge();
+        }
+
+        function setStatusForSelected(status) {
+            for (let punch of myPunches) {
+                if (selectedIds.has(punch.id)) {
+                    punch.status = status;
+                }
+            }
+            selectedIds.clear();
+            renderReview();
+        }
+
+        function showToast(message) {
+            toast.textContent = message;
+            toast.hidden = false;
+            clearTimeout(showToast.timer);
+            showToast.timer = setTimeout(() => { toast.hidden = true; }, 2500);
+        }
+
+        reviewList.addEventListener("change", event => {
+            if (!event.target.classList.contains("rv-check")) return;
+            const id = Number(event.target.dataset.id);
+            if (event.target.checked) {
+                selectedIds.add(id);
+            } else {
+                selectedIds.delete(id);
+            }
+            renderReview();
+        });
+
+        selectAll.addEventListener("change", () => {
+            selectedIds.clear();
+            if (selectAll.checked) myPunches.forEach(p => selectedIds.add(p.id));
+            renderReview();
+        });
+
+        confirmBtn.addEventListener("click", () => {
+            const count = selectedIds.size;
+            setStatusForSelected("Confirmed");
+            showToast(count + " punch(es) marked Confirmed. Tap Save to submit.");
+        });
+
+        // Report works like Confirm: it only sets the status (no popup)
+        reportBtn.addEventListener("click", () => {
+            const count = selectedIds.size;
+            setStatusForSelected("Reported");
+            showToast(count + " punch(es) marked Reported. Tap Save to submit.");
+        });
+
+        // Save submits every punch that has a status; the rest stay pending
+        saveBtn.addEventListener("click", () => {
+            const reviewed = myPunches.filter(p => p.status);
+
+            // Replace with a real API call
+            console.log("Saving acknowledgements:", reviewed.map(p => ({ id: p.id, status: p.status })));
+
+            myPunches = myPunches.filter(p => !p.status);
+            renderReview();
+            showToast(reviewed.length + " punch(es) saved.");
+        });
+
+        // ================= Screens 5–7: Review Actions → Concern detail → Edit Punch =================
+        // DUMMY data — reported concerns from employees that the manager must view and resolve.
+
+        const JOB_CODES = ["Server", "Team leader", "Cook", "Host", "Cashier"];
+        const ADJUSTMENT_REASONS = ["Due to System Failure", "Forgot to Clock In", "Forgot to Clock Out", "Missed Break Punch", "Device Offline", "Schedule Change"];
+
+        const Q_MEAL = "Q1 — I had the opportunity to take each meal break I was entitled to. If my meal was not taken, was under 30 minutes, or began after the end of the 5th hour of work (or, for a 2nd meal, after the 10th hour), that was the result of my voluntary choice.";
+        const Q_REST = "Q2 — I was provided the opportunity to take each 10-minute rest break I was entitled to.";
+        const Q_TIMES = "Q1 — The clock in and clock out times shown for this shift are correct.";
+        const Q_HOURS = "Q2 — I was not asked to perform any work while clocked out.";
+
+        function shift(date, jobCode, payRate, clockIn, clockOut, breaks = [], reason = "") {
+            return {
+                date, jobCode, payRate, clockIn, clockOut, breaks, reason,
+                cash: 0, credit: 0, comments: "",
+            };
+        }
+
+        let reportedConcerns = [
+            // Reported Attestation
+            { id: "a1", kind: "attestation", name: "Cary",    shiftDate: "2026/10/20", shift: shift("Tue, Oct 20", "Server", 15, "3:23a", "3:27a"),
+              questions: [{ q: Q_MEAL, answer: "No", reason: "Meal break was shorter than 30 minutes" }] },
+            { id: "a2", kind: "attestation", name: "Mia T",   shiftDate: "2026/10/20", shift: shift("Tue, Oct 20", "Cook", 18, "6:00a", "2:45p", [{ type: "Meal", start: "11:00a", end: "11:20a" }]),
+              questions: [{ q: Q_MEAL, answer: "No", reason: "Meal break was shorter than 30 minutes" }] },
+            { id: "a3", kind: "attestation", name: "Owen C",  shiftDate: "2026/10/19", shift: shift("Mon, Oct 19", "Host", 14, "4:00p", "11:30p", [{ type: "Meal", start: "10:05p", end: "10:35p" }]),
+              questions: [{ q: Q_MEAL, answer: "No", reason: "Meal break started after the 5th hour" }, { q: Q_REST, answer: "Yes", reason: "" }] },
+
+            // Reported Shift Confirmation
+            { id: "s1", kind: "shift", name: "Andrew",  shiftDate: "2026/10/21", shift: shift("Wed, Oct 21", "Team leader", 20, "9:00a", "5:30p"),
+              questions: [{ q: Q_TIMES, answer: "No", reason: "Clock out time is wrong" }] },
+            { id: "s2", kind: "shift", name: "Cary",    shiftDate: "2026/10/20", shift: shift("Tue, Oct 20", "Server", 15, "3:23a", "3:27a"),
+              questions: [{ q: Q_TIMES, answer: "No", reason: "Clock in time is wrong" }] },
+            { id: "s3", kind: "shift", name: "Lucas B", shiftDate: "2026/10/18", shift: shift("Sun, Oct 18", "Cook", 18, "6:00a", "2:30p"),
+              questions: [{ q: Q_TIMES, answer: "Yes", reason: "" }, { q: Q_HOURS, answer: "No", reason: "Worked 15 minutes after clock out" }] },
+            { id: "s4", kind: "shift", name: "Zoe F",   shiftDate: "2026/10/17", shift: shift("Sat, Oct 17", "Cashier", 16, "11:00a", "7:00p"),
+              questions: [{ q: Q_TIMES, answer: "No", reason: "Missing break punch" }] },
+
+            // Reported Acknowledgement (employee reported an edited punch)
+            { id: "k1", kind: "acknowledgement", name: "Cary",    shiftDate: "2026/10/16", punchType: "Clock In",          punchTime: "8:03a",
+              shift: shift("Fri, Oct 16", "Server", 15, "8:03a", "4:00p", [], "Due to System Failure") },
+            { id: "k2", kind: "acknowledgement", name: "Cary",    shiftDate: "2026/10/16", punchType: "Break End(Rest)",   punchTime: "5:30a",
+              shift: shift("Fri, Oct 16", "Server", 15, "5:00a", "9:00a", [{ type: "Rest", start: "5:20a", end: "5:30a" }], "Missed Break Punch") },
+            { id: "k3", kind: "acknowledgement", name: "Roman",   shiftDate: "2026/10/14", punchType: "Break Start(Rest)", punchTime: "7:36a",
+              shift: shift("Wed, Oct 14", "Host", 14, "6:00a", "2:00p", [{ type: "Rest", start: "7:36a", end: "7:46a" }], "Forgot to Clock In") },
+            { id: "k4", kind: "acknowledgement", name: "Sofia M", shiftDate: "2026/10/16", punchType: "Break End(Rest)",   punchTime: "5:50a",
+              shift: shift("Fri, Oct 16", "Server", 15, "4:30a", "11:00a", [{ type: "Rest", start: "5:40a", end: "5:50a" }], "Due to System Failure") },
+            { id: "k5", kind: "acknowledgement", name: "Mia T",   shiftDate: "2026/10/15", punchType: "Clock Out",         punchTime: "5:30p",
+              shift: shift("Thu, Oct 15", "Cook", 18, "9:00a", "5:30p", [], "Forgot to Clock Out") },
+            { id: "k6", kind: "acknowledgement", name: "Ethan W", shiftDate: "2026/10/15", punchType: "Break Start(Rest)", punchTime: "1:15p",
+              shift: shift("Thu, Oct 15", "Cashier", 16, "9:00a", "5:00p", [{ type: "Rest", start: "1:15p", end: "1:25p" }], "Device Offline") },
+        ];
+
+        const CONCERN_GROUPS = [
+            { kind: "attestation",     title: "Reported Attestation",        detailHeading: "Attestation Detail" },
+            { kind: "shift",           title: "Reported Shift Confirmation", detailHeading: "Shift Confirmation Detail" },
+            { kind: "acknowledgement", title: "Reported Acknowledgement",    detailHeading: "" },
+        ];
+        const collapsedGroups = new Set();
+
+        const ICON_CLOCK = `<svg viewBox="0 0 24 24" width="13" height="13"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 7v5l3 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
+        const ICON_ARROW = `<svg viewBox="0 0 24 24" width="13" height="13"><circle cx="12" cy="12" r="10" fill="#555"/><path d="M8 12h8M13 9l3 3-3 3" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+        const ICON_EYE = `<svg viewBox="0 0 24 24" width="17" height="17"><path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6S2 12 2 12z" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>`;
+        const ICON_EDIT = `<svg viewBox="0 0 24 24" width="17" height="17"><path d="M4 20h4L19 9l-4-4L4 16z M13.5 6.5l4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>`;
+        const ICON_THUMB = `<svg viewBox="0 0 24 24" width="17" height="17"><path d="M7 10v10H4V10zM7 10l4-7c1.2 0 2 1 1.8 2.2L12.3 9H18c1.1 0 1.9 1 1.7 2l-1.3 7c-.2.9-1 1.5-1.9 1.5H7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>`;
+
+        // Time helpers: "3:23a" ⇄ "03:23" (for <input type="time">) ⇄ minutes
+        function to24(time) {
+            const match = /^(\d{1,2}):(\d{2})([ap])$/.exec(time || "");
+            if (!match) return "";
+            let hour = Number(match[1]) % 12;
+            if (match[3] === "p") hour += 12;
+            return String(hour).padStart(2, "0") + ":" + match[2];
+        }
+
+        function to12(time) {
+            if (!time) return "";
+            const [h, m] = time.split(":").map(Number);
+            return ((h % 12) || 12) + ":" + String(m).padStart(2, "0") + (h < 12 ? "a" : "p");
+        }
+
+        function minutesOf(time24) {
+            const [h, m] = time24.split(":").map(Number);
+            return h * 60 + m;
+        }
+
+        function updateActionsBadge() {
+            document.getElementById("actionsBadge").textContent = reportedConcerns.length;
+        }
+
+        function findConcern(id) {
+            return reportedConcerns.find(c => c.id === id);
+        }
+
+        function resolveConcern(id, message) {
+            reportedConcerns = reportedConcerns.filter(c => c.id !== id);
+            renderActions();
+            showToast(message);
+        }
+
+        // ----- Screen 5: list -----
+
+        function renderActionItem(item) {
+            const punchLine = item.kind === "acknowledgement"
+                ? `<span class="ra-line"><span class="ra-punch-type">${escapeHtml(item.punchType)}</span> ${ICON_ARROW} ${escapeHtml(item.punchTime)}</span>`
+                : "";
+            const openButton = item.kind === "acknowledgement"
+                ? `<a class="ra-icon-btn ra-view" href="#edit/${item.id}" data-nav aria-label="Edit punch">${ICON_EDIT}</a>`
+                : `<a class="ra-icon-btn ra-view" href="#concern/${item.id}" data-nav aria-label="View details">${ICON_EYE}</a>`;
+
+            return `
+                <div class="ra-item">
+                    ${avatarHtml(item.name)}
+                    <span class="ra-info">
+                        <span class="ra-name">${escapeHtml(item.name)}</span>
+                        <span class="ra-line">${ICON_CLOCK} Shift Date - ${escapeHtml(item.shiftDate)}</span>
+                        ${punchLine}
+                    </span>
+                    ${openButton}
+                    <button class="ra-icon-btn ra-resolve" data-resolve="${item.id}" aria-label="Mark resolved">${ICON_THUMB}</button>
+                </div>`;
+        }
+
+        function renderActions() {
+            const total = reportedConcerns.length;
+            document.getElementById("actionsSummary").textContent =
+                total + (total === 1 ? " Reported Concern" : " Reported Concerns") + " to Review";
+
+            const html = CONCERN_GROUPS.map(group => {
+                const items = reportedConcerns.filter(c => c.kind === group.kind);
+                if (items.length === 0) return "";
+                return `
+                    <div class="ra-group ${collapsedGroups.has(group.kind) ? "collapsed" : ""}" data-kind="${group.kind}">
+                        <button class="ra-group-head">
+                            ${group.title} <span class="ra-count">${items.length}</span>
+                            <svg class="zc-chevron" viewBox="0 0 24 24" width="18" height="18"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        </button>
+                        ${items.map(renderActionItem).join("")}
+                    </div>`;
+            }).join("");
+
+            document.getElementById("actionsList").innerHTML = html || `<p class="empty">No reported concerns 🎉</p>`;
+            updateActionsBadge();
+        }
+
+        document.getElementById("actionsList").addEventListener("click", event => {
+            const head = event.target.closest(".ra-group-head");
+            if (head) {
+                const kind = head.parentElement.dataset.kind;
+                collapsedGroups.has(kind) ? collapsedGroups.delete(kind) : collapsedGroups.add(kind);
+                head.parentElement.classList.toggle("collapsed");
+                return;
+            }
+            const resolve = event.target.closest("[data-resolve]");
+            if (resolve) {
+                resolveConcern(resolve.dataset.resolve, "Concern marked as resolved.");
+            }
+        });
+
+        // ----- Screen 6: concern detail -----
+
+        function renderConcern(item) {
+            const group = CONCERN_GROUPS.find(g => g.kind === item.kind);
+
+            document.getElementById("concernProfile").innerHTML = `
+                ${avatarHtml(item.name)}
+                <span class="zc-info">
+                    <span class="zc-name">${escapeHtml(item.name)}</span>
+                    <span class="zc-profile-sub">Shift Date - ${escapeHtml(item.shiftDate)}</span>
+                </span>`;
+
+            document.getElementById("concernSummary").innerHTML = `
+                <div><span>Job Code</span><strong>${escapeHtml(item.shift.jobCode)}</strong></div>
+                <div><span>Clock In</span><strong>${escapeHtml(item.shift.clockIn)}</strong></div>
+                <div><span>Clock Out</span><strong>${escapeHtml(item.shift.clockOut)}</strong></div>`;
+
+            document.getElementById("concernHeading").textContent = group.detailHeading;
+
+            document.getElementById("concernQuestions").innerHTML = item.questions.map(question => `
+                <div class="cn-question">
+                    <p>${escapeHtml(question.q)}</p>
+                    <div class="cn-answer">
+                        Answer: <span class="cn-chip ${question.answer === "No" ? "cn-no" : "cn-yes"}">${question.answer}</span>
+                        ${question.reason ? `Reason: <span class="cn-chip cn-reason">${escapeHtml(question.reason)}</span>` : ""}
+                    </div>
+                </div>`).join("");
+
+            document.getElementById("concernEditBtn").setAttribute("href", "#edit/" + item.id);
+            document.getElementById("concernResolveBtn").dataset.id = item.id;
+            document.getElementById("concernScroll").scrollTop = 0;
+        }
+
+        document.getElementById("concernResolveBtn").addEventListener("click", event => {
+            resolveConcern(event.currentTarget.dataset.id, "Concern marked as resolved.");
+            goBackTo("#actions");
+        });
+
+        // ----- Screen 7: edit punch -----
+
+        let editItem = null;
+        let editDraft = null;
+        let deleteArmed = false;
+
+        function fillSelect(select, options, value) {
+            select.innerHTML = `<option value="">Select</option>` +
+                options.map(o => `<option ${o === value ? "selected" : ""}>${escapeHtml(o)}</option>`).join("");
+        }
+
+        function renderBreaks() {
+            const list = document.getElementById("breakList");
+            if (editDraft.breaks.length === 0) {
+                list.innerHTML = `<p class="ep-empty">No breaks. Tap + to add one.</p>`;
+                return;
+            }
+            const clockIcon = `<svg class="ep-icon" viewBox="0 0 24 24" width="15" height="15"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 7v5l3 2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
+            const caret = `<svg class="ep-caret" viewBox="0 0 10 6" width="10" height="6"><path d="M0 0h10L5 6z" fill="currentColor"/></svg>`;
+
+            list.innerHTML = `<div class="ep-break-head"><span>Type</span><span>Start</span><span>End</span></div>` +
+                editDraft.breaks.map((b, i) => `
+                <div class="ep-break">
+                    <span class="ep-input ep-select">
+                        <select data-break="${i}" data-field="type" aria-label="Break type">
+                            <option ${b.type === "Meal" ? "selected" : ""}>Meal</option>
+                            <option ${b.type === "Rest" ? "selected" : ""}>Rest</option>
+                        </select>
+                        ${caret}
+                    </span>
+                    <span class="ep-input">${clockIcon}<input type="time" data-break="${i}" data-field="start" value="${to24(b.start)}" aria-label="Break start"></span>
+                    <span class="ep-input">${clockIcon}<input type="time" data-break="${i}" data-field="end" value="${to24(b.end)}" aria-label="Break end"></span>
+                    <button type="button" class="ep-remove" data-remove-break="${i}" aria-label="Remove break">✕</button>
+                </div>`).join("");
+        }
+
+        function updateClockHours() {
+            const clockIn = document.getElementById("epClockIn").value;
+            const clockOut = document.getElementById("epClockOut").value;
+            let text = "00:00";
+            if (clockIn && clockOut) {
+                let minutes = minutesOf(clockOut) - minutesOf(clockIn);
+                if (minutes < 0) minutes += 24 * 60; // overnight shift
+                text = String(Math.floor(minutes / 60)).padStart(2, "0") + ":" + String(minutes % 60).padStart(2, "0");
+            }
+            document.getElementById("clockHours").textContent = text;
+        }
+
+        function renderEdit(item) {
+            editItem = item;
+            editDraft = structuredClone(item.shift);
+            deleteArmed = false;
+            document.getElementById("deletePunchBtn").textContent = "Delete";
+
+            document.getElementById("editTitle").textContent = "Edit Punch (" + item.name + ")";
+            document.getElementById("editDate").textContent = editDraft.date;
+
+            fillSelect(document.getElementById("epJobCode"), JOB_CODES, editDraft.jobCode);
+            fillSelect(document.getElementById("epReason"), ADJUSTMENT_REASONS, editDraft.reason);
+            document.getElementById("epPayRate").value = editDraft.payRate.toFixed(2);
+            document.getElementById("epClockIn").value = to24(editDraft.clockIn);
+            document.getElementById("epClockOut").value = to24(editDraft.clockOut);
+            document.getElementById("epCash").value = editDraft.cash.toFixed(2);
+            document.getElementById("epCredit").value = editDraft.credit.toFixed(2);
+            document.getElementById("epComments").value = editDraft.comments;
+            document.querySelectorAll(".ep-error").forEach(e => { e.hidden = true; });
+            document.querySelectorAll(".ep-input.invalid").forEach(f => f.classList.remove("invalid"));
+
+            renderBreaks();
+            updateClockHours();
+            document.getElementById("editScroll").scrollTop = 0;
+        }
+
+        document.getElementById("epClockIn").addEventListener("input", updateClockHours);
+        document.getElementById("epClockOut").addEventListener("input", updateClockHours);
+
+        document.getElementById("addBreakBtn").addEventListener("click", () => {
+            editDraft.breaks.push({ type: "Rest", start: "", end: "" });
+            renderBreaks();
+        });
+
+        document.getElementById("breakList").addEventListener("input", event => {
+            const index = event.target.dataset.break;
+            if (index === undefined) return;
+            const field = event.target.dataset.field;
+            editDraft.breaks[index][field] = field === "type" ? event.target.value : to12(event.target.value);
+        });
+
+        document.getElementById("breakList").addEventListener("click", event => {
+            const remove = event.target.closest("[data-remove-break]");
+            if (!remove) return;
+            editDraft.breaks.splice(Number(remove.dataset.removeBreak), 1);
+            renderBreaks();
+        });
+
+        // Required: Job Code, Clock In, Adjustment Reason
+        function validateEdit() {
+            let valid = true;
+            for (let id of ["epJobCode", "epClockIn", "epReason"]) {
+                const input = document.getElementById(id);
+                const missing = !input.value;
+                input.closest(".ep-input").classList.toggle("invalid", missing);
+                document.querySelector(`.ep-error[data-for="${id}"]`).hidden = !missing;
+                if (missing) valid = false;
+            }
+            return valid;
+        }
+
+        document.getElementById("savePunchBtn").addEventListener("click", () => {
+            if (!validateEdit()) {
+                showToast("Fill in the required fields.");
+                return;
+            }
+
+            const updated = {
+                ...editDraft,
+                jobCode: document.getElementById("epJobCode").value,
+                payRate: Number(document.getElementById("epPayRate").value) || 0,
+                clockIn: to12(document.getElementById("epClockIn").value),
+                clockOut: to12(document.getElementById("epClockOut").value),
+                cash: Number(document.getElementById("epCash").value) || 0,
+                credit: Number(document.getElementById("epCredit").value) || 0,
+                reason: document.getElementById("epReason").value,
+                comments: document.getElementById("epComments").value.trim(),
+                breaks: editDraft.breaks.filter(b => b.start || b.end),
+            };
+
+            // Replace with a real API call
+            console.log("Saving punch for", editItem.name, updated);
+
+            editItem.shift = updated;
+            resolveConcern(editItem.id, "Punch saved. Concern resolved.");
+            goBackTo("#actions");
+        });
+
+        // Delete needs a second tap to confirm
+        document.getElementById("deletePunchBtn").addEventListener("click", event => {
+            const button = event.currentTarget;
+            if (!deleteArmed) {
+                deleteArmed = true;
+                button.textContent = "Tap to confirm";
+                clearTimeout(button.timer);
+                button.timer = setTimeout(() => { deleteArmed = false; button.textContent = "Delete"; }, 3000);
+                return;
+            }
+            clearTimeout(button.timer);
+
+            // Replace with a real API call
+            console.log("Deleting punch for", editItem.name, editItem.shift);
+
+            resolveConcern(editItem.id, "Punch deleted.");
+            goBackTo("#actions");
+        });
+
+        // ================= Navigation =================
+        // Main → #list → #detail/<name>
+        // Main → #review
+        // Main → #actions → #concern/<id> → #edit/<id>   (or #actions → #edit/<id>)
+        // The phone/browser back button works too, because every step is a history entry.
+
+        const screens = {
+            main: document.getElementById("screenMain"),
+            list: document.getElementById("screenList"),
+            detail: document.getElementById("screenDetail"),
+            review: document.getElementById("screenReview"),
+            actions: document.getElementById("screenActions"),
+            concern: document.getElementById("screenConcern"),
+            edit: document.getElementById("screenEdit"),
+        };
+        const depth = { main: 0, list: 1, detail: 2, review: 1, actions: 1, concern: 2, edit: 3 };
+        let currentScreen = null;
+
+        // Hashes of the in-app history entries, oldest first ("" = main)
+        let navStack = [""];
+
+        function parseRoute() {
+            const hash = location.hash.slice(1);
+            if (hash.startsWith("detail/")) return { screen: "detail", name: decodeURIComponent(hash.slice(7)) };
+            if (hash.startsWith("concern/")) return { screen: "concern", id: hash.slice(8) };
+            if (hash.startsWith("edit/")) return { screen: "edit", id: hash.slice(5) };
+            if (hash === "list") return { screen: "list" };
+            if (hash === "review") return { screen: "review" };
+            if (hash === "actions") return { screen: "actions" };
+            return { screen: "main" };
+        }
+
+        function navigate(href) {
+            history.pushState({ inApp: true }, "", href);
+            navStack.push(href);
+            showRoute();
+        }
+
+        // Jump back to an earlier screen (e.g. after Save on Edit Punch, return to the list)
+        function goBackTo(hash) {
+            const index = navStack.lastIndexOf(hash);
+            const steps = navStack.length - 1 - index;
+            if (index >= 0 && steps > 0) {
+                history.go(-steps);
+            } else {
+                history.replaceState({ inApp: true }, "", hash);
+                navStack[navStack.length - 1] = hash;
+                showRoute();
+            }
+        }
+
+        function showRoute() {
+            const route = parseRoute();
+
+            // A resolved concern can't be reopened (e.g. via the browser forward button)
+            if ((route.screen === "concern" || route.screen === "edit") && !findConcern(route.id)) {
+                history.replaceState({ inApp: true }, "", "#actions");
+                navStack[navStack.length - 1] = "#actions";
+                return showRoute();
+            }
+
+            if (route.screen === "detail") renderDetail(route.name);
+            if (route.screen === "actions") renderActions();
+            if (route.screen === "concern") renderConcern(findConcern(route.id));
+            if (route.screen === "edit") renderEdit(findConcern(route.id));
+
+            const next = screens[route.screen];
+            if (currentScreen && currentScreen !== next) {
+                const goingForward = depth[route.screen] > depth[currentScreen.dataset.name];
+                next.classList.remove("slide-in", "slide-back");
+                void next.offsetWidth; // restart the animation
+                next.classList.add(goingForward ? "slide-in" : "slide-back");
+            }
+
+            for (let key in screens) {
+                screens[key].dataset.name = key;
+                screens[key].hidden = screens[key] !== next;
+            }
+            currentScreen = next;
+        }
+
+        // In-app links push a history entry instead of reloading
+        document.addEventListener("click", event => {
+            const link = event.target.closest("a[data-nav]");
+            if (link) {
+                event.preventDefault();
+                navigate(link.getAttribute("href"));
+                return;
+            }
+
+            // Back arrow: go back in history if we came from inside the app, else jump to the parent screen
+            const back = event.target.closest("[data-back]");
+            if (back) {
+                if (navStack.length > 1) {
+                    history.back();
+                } else {
+                    const parent = back.dataset.back === "main" ? "" : "#" + back.dataset.back;
+                    history.replaceState(null, "", parent || location.pathname + location.search);
+                    navStack = [parent];
+                    showRoute();
+                }
+            }
+        });
+
+        // Browser/phone back button: trim the stack to the entry we landed on
+        window.addEventListener("popstate", () => {
+            const hash = location.hash;
+            const index = navStack.lastIndexOf(hash);
+            navStack = index >= 0 ? navStack.slice(0, index + 1) : [hash];
+            showRoute();
+        });
+
+        // Every load/refresh starts fresh on the first screen (drops any #list / #detail / #review)
+        history.replaceState(null, "", location.pathname + location.search);
+
+        renderList();
+        renderReview();
+        renderActions();
+        showRoute();
+
+        // Preview frame: show the current time in the fake status bar
+        document.getElementById("deviceClock").textContent =
+            new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12: false });
+    </script>
+</body>
+</html>
